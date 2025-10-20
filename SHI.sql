@@ -1,3 +1,4 @@
+-- Таблица Сервисы
 CREATE TABLE services (
 	service_code SERIAL PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -51,7 +52,6 @@ CREATE TABLE tariffs (
 	hot_water BOOLEAN NOT NULL DEFAULT false,
 	garbage_chute BOOLEAN NOT NULL DEFAULT true,
 	elevator BOOLEAN NOT NULL DEFAULT true,
-	-- рекомендую в будущем разнести rate по типам, но оставляю твой rate
 	rate NUMERIC(10, 2) NOT NULL CHECK (rate >= 0),
 	UNIQUE (cold_water, hot_water, garbage_chute, elevator, rate)
 );
@@ -84,7 +84,6 @@ CREATE TABLE residents (
 	birth_date DATE,
 	is_responsible BOOLEAN NOT NULL DEFAULT false,
 	payer_code INT REFERENCES payer_codes(payer_code),
-	-- убираем слишком жёсткий составной UNIQUE (может блокировать пустые passport/inn)
 	UNIQUE (apartment_code, full_name)
 );
 
@@ -123,7 +122,6 @@ CREATE OR REPLACE FUNCTION trg_resident_one_responsible()
 RETURNS TRIGGER AS $$
 BEGIN
 	IF (NEW.is_responsible IS TRUE) THEN
-		-- ставим false у остальных жильцов той же квартиры
 		UPDATE residents
 		SET is_responsible = FALSE
 		WHERE apartment_code = NEW.apartment_code
@@ -156,27 +154,20 @@ BEGIN
 
 	-- UPDATE
 	IF TG_OP = 'UPDATE' THEN
-		-- 1) если квартира изменилась — скорректировать старую и новую квартиры отдельно
 		IF OLD.apartment_code IS DISTINCT FROM NEW.apartment_code THEN
-			-- уменьшить у старой
 			UPDATE apartment_payments_summary
 			SET total_paid = GREATEST(total_paid - OLD.amount, 0)
 			WHERE apartment_code = OLD.apartment_code;
-
-			-- пересчитать last_payment_date для старой квартиры (на основе оставшихся записей)
 			SELECT MAX(pay_date) INTO max_date FROM payments WHERE apartment_code = OLD.apartment_code;
 			UPDATE apartment_payments_summary
 			SET last_payment_date = max_date
 			WHERE apartment_code = OLD.apartment_code;
-
-			-- добавить в новую (как при INSERT)
 			INSERT INTO apartment_payments_summary(apartment_code, total_paid, last_payment_date)
 			VALUES (NEW.apartment_code, NEW.amount, NEW.pay_date)
 			ON CONFLICT (apartment_code) DO UPDATE
 				SET total_paid = apartment_payments_summary.total_paid + NEW.amount,
 				    last_payment_date = GREATEST(COALESCE(apartment_payments_summary.last_payment_date, DATE '0001-01-01'), NEW.pay_date);
 		ELSE
-			-- квартира та же: скорректировать сумму и пересчитать last_payment_date
 			UPDATE apartment_payments_summary
 			SET total_paid = GREATEST(total_paid - OLD.amount + NEW.amount, 0)
 			WHERE apartment_code = NEW.apartment_code;
@@ -194,7 +185,6 @@ BEGIN
 		UPDATE apartment_payments_summary
 		SET total_paid = GREATEST(total_paid - OLD.amount, 0)
 		WHERE apartment_code = OLD.apartment_code;
-
 		SELECT MAX(pay_date) INTO max_date FROM payments WHERE apartment_code = OLD.apartment_code;
 		UPDATE apartment_payments_summary
 		SET last_payment_date = max_date
